@@ -1,0 +1,427 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" ReferencedAssemblies="System.dll&#13;&#10;System.Drawing.dll&#13;&#10;System.Windows.Forms.dll&#13;&#10;System.Data.dll&#13;&#10;System.Xml.dll&#13;&#10;System.Data.OracleClient.dll&#13;&#10;Sm.Objects.dll&#13;&#10;Sm.Interfaces.dll&#13;&#10;Sm.Core.dll&#13;&#10;Sm.Forms.dll&#13;&#10;Sm.AppServer.Interfaces.dll&#13;&#10;Sm.AppServer.Link.dll&#13;&#10;Sm.FastReports.dll&#13;&#10;Sm.FastReports.Link.dll" ConvertNulls="false" StartReportEvent="_StartReport" ReportInfo.Created="06/22/2010 10:01:00" ReportInfo.Modified="07/08/2014 10:24:04" ReportInfo.CreatorVersion="1.9.2.0">
+  <ScriptText>using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows.Forms;
+using System.Drawing;
+using System.Data;
+using FastReport;
+using FastReport.Data;
+using FastReport.Dialog;
+using FastReport.Table;
+using FastReport.Utils;
+using FastReport.Format;
+
+using Sm.FastReports;
+using Sm.FastReports.Link;
+using Sm.Interfaces;
+using Sm.Objects;
+using Sm.Core;
+
+namespace FastReport
+{
+  public class ReportScript
+  {
+    RepHost host;
+    
+    // название отчета
+    private string sRepName;
+    // подзаголовок отчета: описание ряда опций
+    private string sTitle = &quot;&quot;;
+    // подзаголовок отчета: места хранения
+    private string sLocName;
+    // подзаголовок отчета: группы товаров
+    private string sGroupName;
+    // подзаголовок отчета: выбранный вид цены
+    private string sPriceName = &quot;&quot;;
+    // контрагент &quot;От имени&quot;
+    private string sUserName;
+    // номер п/п текущего артикула
+    private Int32 iArticlePos = 0;
+    
+    private void _StartReport(object sender, EventArgs e)
+    {                
+      // Хост отчёта даёт доступ к полезным сервисам
+      host = new RepHost(Report);
+      // Стартуем транзакцию
+      RepTransaction transaction = new RepTransaction(host.Connection);
+      
+      // контрагент &quot;От имени&quot;
+      sUserName = RepClientInfo.GetClientName(host.Connection, Report.GetParameterValue(&quot;P_USER_ID&quot;));
+      // заголовок отчета
+      sRepName = &quot;Товар без движения&quot;;
+
+      if ( 0 != ToInt32(Report.GetParameterValue(&quot;P_OP_1&quot;)) )   sTitle += &quot;, продажа&quot;;
+      if ( 0 != ToInt32(Report.GetParameterValue(&quot;P_OP_4&quot;)) )   sTitle += &quot;, перемещение&quot;;
+      if ( 0 != ToInt32(Report.GetParameterValue(&quot;P_OP_10&quot;)) )  sTitle += &quot;, передача товара&quot;;
+      sTitle = &quot; (&quot;+sTitle.Substring(2)+&quot;) &quot;;  
+     
+      switch ( ToInt32(Report.GetParameterValue(&quot;P_TIME&quot;)) )
+      {
+        case 0: // товар не участвовал в движении за период
+          string sFirstDate = ToString(Report.GetParameterValue(&quot;P_FIRSTDATE&quot;));
+          string sLastDate = ToString(Report.GetParameterValue(&quot;P_LASTDATE&quot;));
+          sTitle = &quot;Товар не участвовал в движении&quot;+sTitle+&quot;с &quot;+sFirstDate+&quot; по &quot;+sLastDate+&quot; ( &quot;+ToString((RepConvert.ToSmDate(sLastDate)-RepConvert.ToSmDate(sFirstDate)).Days+1)+&quot; дн. )&quot;;
+          if ( 0 != ToInt32(Report.GetParameterValue(&quot;P_OST&quot;)) )
+            sTitle += &quot; и пролежал весь период&quot;;
+          break;
+        case 1: // товар никогда не двигался
+          sTitle = &quot;Товар никогда не участвовал в движении&quot;+sTitle;
+          break;
+        case 2: // товар без движения с последнего поступления
+          sTitle = &quot;Товар не участвовал в движении&quot;+sTitle+&quot;с момента последнего поступления&quot;;
+          break;
+        case 3: // товар без движения P_DAYS_AFTER_IN дней с последнего поступления
+          sTitle = &quot;Товар не участвовал в движении&quot;+sTitle+ToString(Report.GetParameterValue(&quot;P_DAYS_AFTER_IN&quot;))+&quot; дн. с момента последнего поступления&quot;;
+          break;
+      }
+      
+      if ( 0 == ToInt32(Report.GetParameterValue(&quot;P_OSTLIMIT&quot;)) )
+        sTitle += SqlFormat(&quot;\r\nТекущий остаток больше {0:U}&quot;, Report.GetParameterValue(&quot;P_OSTVAL&quot;));
+      else
+        sTitle += SqlFormat(&quot;\r\nТекущий остаток больше нуля, но меньше {0:U}&quot;, Report.GetParameterValue(&quot;P_OSTVAL&quot;));
+                            
+      // фильтр по местам хранения
+      RepOracleRunner.ExecuteProcedure(host.Connection,&quot;Supermag.RepTools.LoadLoc&quot;, 
+        Report.GetParameterValue(&quot;P_STORED_ALL&quot;),
+        Report.GetParameterValue(&quot;P_STORED_NAME&quot;),
+        Report.GetParameterValue(&quot;P_PARTNER&quot;),
+        null); 
+      // подзаголовок отчета: места хранения
+      sLocName = RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection, &quot;select supermag.RepTools.LocString(10) from dual&quot;);
+      
+      // фильтр по группам товаров
+      RepOracleRunner.ExecuteProcedure(host.Connection,&quot;Supermag.RepTools.LoadClass&quot;, 
+        Report.GetParameterValue(&quot;P_GROUP_ALL&quot;),
+        Report.GetParameterValue(&quot;P_BGROUP&quot;),
+        Report.GetParameterValue(&quot;P_GROUP_TREE&quot;));                               
+      // подзаголовок отчета: группы товаров
+      sGroupName = RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection, &quot;select supermag.RepTools.ClassString(10) from dual&quot;);
+     
+      // группировка по группам товаров
+      if ( ReportGroupClassOption.No == ToInt32(Report.GetParameterValue(&quot;P_GROUP_ALL&quot;)) )
+      {
+        GroupHeaderClass.Visible = false;
+        GroupFooterClass.Visible = false;
+      }
+     
+      if ( 0 == ToInt32(Report.GetParameterValue(&quot;P_IN_SUPP&quot;)) )
+      { // прячем колонку &quot;Поставщик&quot;
+        ColumnHeaderNameIncome.Width += ColumnHeaderClient.Width;
+        ColumnName.Width = ColumnHeaderNameIncome.Width;
+        ColumnHeaderClient.Width = 0;
+        ColumnClient.Width = 0;
+      }
+      
+      if ( 0 == ToInt32(Report.GetParameterValue(&quot;P_IN_PRICE&quot;)) )
+      { // прячем колонку &quot;Сумма в ценах последних приходов&quot;
+        ColumnHeaderAccountSum.Width += ColumnHeaderIncomeSum.Width;
+        ColumnAccountSum.Width = ColumnHeaderAccountSum.Width;
+        ColumnAccountSumClass.Width = ColumnHeaderAccountSum.Width;
+        ColumnAccountSumLoc.Width = ColumnHeaderAccountSum.Width;
+        ColumnAccountSumRep.Width = ColumnHeaderAccountSum.Width;
+        ColumnHeaderIncomeSum.Width = 0;
+        ColumnIncomeSum.Width = 0;
+        ColumnIncomeSumClass.Width = 0;
+        ColumnIncomeSumLoc.Width = 0;
+        ColumnIncomeSumRep.Width = 0;
+      }
+      
+      // true, если в отчете выводятся суммы в ценах последних приходов
+      bool isViewIncomeSum = ( ToInt32(Report.GetParameterValue(&quot;P_IN_PRICE&quot;)) != 0 );
+      // true, если в отчете выводятся учетные цены
+      bool isViewAccountPrice = ( null == Report.GetParameterValue(&quot;P_PRICE_TYPE&quot;) );
+      
+      if ( !isViewAccountPrice )
+      {
+        CellAccountPrice.Text = &quot;Цена выбранного вида цены&quot;;
+        CellAccountSum.Text = &quot;Сумма в выбранном виде цены&quot;;
+        sPriceName = RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection,
+        SqlFormat(&quot;select 'Вид цены: '||p.Name||' ('||c.ShortName||')' from supermag.SMPriceTypes p, supermag.SMCurrencies c where p.ID={0:N} and c.ID=p.CurrType&quot;
+          ,ToInt32(Report.GetParameterValue(&quot;P_PRICE_TYPE&quot;))));
+      }
+      else
+      {
+        // итоги по отчету не показываем, т.к. учетные цены разных МХ могут иметь разные валюты
+        mCellAccountSumRep.Text = &quot;&quot;;
+      } 
+  
+      // заполняем временные таблицы              
+      RepOracleRunner.ExecuteProcedure(host.Connection,&quot;Supermag.Rep_GoodsNotSale&quot;, 
+        Report.GetParameterValue(&quot;P_FIRSTDATE&quot;),
+        Report.GetParameterValue(&quot;P_LASTDATE&quot;),
+        Report.GetParameterValue(&quot;P_OP_1&quot;),
+        Report.GetParameterValue(&quot;P_OP_4&quot;),
+        Report.GetParameterValue(&quot;P_OP_10&quot;),
+        Report.GetParameterValue(&quot;P_TIME&quot;),
+        Report.GetParameterValue(&quot;P_OST&quot;),
+        Report.GetParameterValue(&quot;P_DAYS_AFTER_IN&quot;),
+        Report.GetParameterValue(&quot;P_OSTLIMIT&quot;),
+        Report.GetParameterValue(&quot;P_OSTVAL&quot;),
+        Report.GetParameterValue(&quot;P_PRICE_TYPE&quot;),
+        Report.GetParameterValue(&quot;P_IN_SUPP&quot;),
+        Report.GetParameterValue(&quot;P_IN_PRICE&quot;)
+        ); 
+     
+      // данные отчета
+      string sSQL = 
+      SqlFormat(&quot;SELECT &quot;+
+        // если выбран показ учетных цен, рядом с именем МХ выводим валюту учетной цены
+        &quot; l.Name||&quot;+(isViewAccountPrice ? &quot;decode(ap.CurrShortName,null,'','    (учетная цена: '||ap.CurrShortName||')')&quot; : &quot;''&quot;)+
+        &quot; LocName&quot;+
+        &quot;,l.ID LocID&quot;+
+        &quot;,{0:U} GroupName&quot;+
+        &quot;,{1:U} GroupNormTree&quot;+
+        &quot;,m.Article&quot;+
+        &quot;,crd.Name CardName&quot;+
+        &quot;,crd.MesAbbrev MesName&quot;+
+        // поставщик
+        &quot;,&quot;+(ToInt32(Report.GetParameterValue(&quot;P_IN_SUPP&quot;)) != 0 
+        ? &quot;(select d.ClientName from supermag.TTOstatki1 o1, supermag.SVDocumentsRep d&quot;+
+        &quot; where o1.LocID=m.StoreLoc and o1.Article=m.Article and d.DocType='WI' and d.ID=o1.ID&quot;+
+        &quot;)&quot; 
+        : &quot;''&quot;)+
+        &quot; ClientName&quot;+
+        &quot;,m.Quantity&quot;+
+        // цена учетная или выбранного вида цены
+        &quot;,nvl(a.Price,0) AccountPrice&quot;+
+        // сумма остатков в ценах учетных или в выбранном виде цены
+        &quot;,nvl(round(a.Price*m.Quantity, a.PricePrec),0) AccountSum&quot;+
+        // сумма остатков в ценах последних приходов
+        &quot;,&quot;+(isViewIncomeSum ? &quot;nvl(round(o2.Price1*m.Quantity, o2.PricePrec),0)&quot; : &quot;0&quot;)+&quot; IncomeSum&quot;+
+        &quot; FROM supermag.SMStoreLocations l&quot;+
+              &quot;,&quot;+RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection, &quot;select supermag.RepTools.ClassString(5) from dual&quot;)+
+              &quot;supermag.SVCardName crd&quot;+
+              &quot;,supermag.TTRemains m&quot;+
+              &quot;,supermag.TTArticlePrice a&quot;+
+              (isViewIncomeSum ? &quot;,supermag.TTOstatki2 o2&quot; : &quot;&quot;)+
+              (isViewAccountPrice ? &quot;,supermag.SVAAccPrice ap&quot; : &quot;&quot;)+
+        &quot; where crd.article = m.article&quot;+
+        &quot; and l.ID = m.StoreLoc&quot;+
+        &quot; and a.LocID(+)=m.StoreLoc&quot;+
+        &quot; and a.Article(+)=m.Article&quot;+
+        RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection, &quot;select supermag.RepTools.ClassString(6,'m') from dual&quot;)+
+        (isViewIncomeSum ? &quot; and o2.Article(+)=m.Article and o2.LocID(+)=m.StoreLoc&quot; : &quot;&quot;)+
+        (isViewAccountPrice ? &quot; and ap.StoreLoc(+)=l.ID&quot; : &quot;&quot;)
+      // выражения для группировки по группам товаров
+      , RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection,&quot;Select supermag.RepTools.ClassString(14) from dual&quot;)
+      , RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection,&quot;Select supermag.RepTools.ClassString(0) from dual&quot;)
+      );        
+      // сортировка
+      sSQL +=  &quot; ORDER BY 1,4,&quot;;
+      if ( ToInt32(Report.GetParameterValue(&quot;P_SORT&quot;)) == 0 )
+        sSQL += &quot;5&quot;; // по артикулу
+      else if ( ToInt32(Report.GetParameterValue(&quot;P_SORT&quot;)) == 1 )
+        sSQL += &quot;6&quot;; // по наименованию товара
+      else
+        sSQL += &quot;9 desc&quot;; // по убыванию текущих остатков
+      host.TableDataSourcePreInit(&quot;RepData&quot;, sSQL);     
+
+    }
+    
+    // предварительные действия перед печатью заголовка МХ
+    private void GroupHeaderLoc_BeforePrint(object sender, EventArgs e)
+    {
+      iArticlePos = 0;
+    }
+    
+    // предварительные действия перед печатью артикула акции
+    private void DataSpec_BeforePrint(object sender, EventArgs e)
+    {
+        iArticlePos++;
+    }
+  
+    
+  }
+}
+</ScriptText>
+  <Dictionary>
+    <SupermagFastReportConnection Name="Connection" LoginPrompt="true">
+      <TableDataSource Name="RepData" DataType="System.Int32" PropName="Table2" Enabled="true" SelectCommand="SELECT &#13;&#10; '' LocName&#13;&#10;, 0 LocID&#13;&#10;, '' GroupName&#13;&#10;, '' GroupNormTree&#13;&#10;, '' Article&#13;&#10;, '' CardName&#13;&#10;, '' MesName&#13;&#10;, '' ClientName&#13;&#10;, 0 Quantity&#13;&#10;, 0 AccountPrice &#13;&#10;, 0 AccountSum &#13;&#10;, 0 IncomeSum&#13;&#10;FROM dual">
+        <Column Name="LOCNAME" DataType="System.String"/>
+        <Column Name="LOCID" DataType="System.Decimal"/>
+        <Column Name="GROUPNAME" DataType="System.String"/>
+        <Column Name="GROUPNORMTREE" DataType="System.String"/>
+        <Column Name="ARTICLE" DataType="System.String"/>
+        <Column Name="CARDNAME" DataType="System.String"/>
+        <Column Name="MESNAME" DataType="System.String"/>
+        <Column Name="CLIENTNAME" DataType="System.String"/>
+        <Column Name="QUANTITY" DataType="System.Decimal"/>
+        <Column Name="ACCOUNTPRICE" DataType="System.Decimal"/>
+        <Column Name="ACCOUNTSUM" DataType="System.Decimal"/>
+        <Column Name="INCOMESUM" DataType="System.Decimal"/>
+      </TableDataSource>
+    </SupermagFastReportConnection>
+    <Parameter Name="P_SURNAME" DataType="System.String"/>
+    <Parameter Name="P_TIME" DataType="System.Int32"/>
+    <Parameter Name="P_SORT" DataType="System.Int32"/>
+    <Parameter Name="P_USER_ID" DataType="System.Int32"/>
+    <Parameter Name="P_PARTNER" DataType="System.Int32"/>
+    <Parameter Name="P_STORED_ALL" DataType="System.Int32"/>
+    <Parameter Name="P_STORED_NAME" DataType="System.String"/>
+    <Parameter Name="P_GROUP_ALL" DataType="System.Int32"/>
+    <Parameter Name="P_GROUP_TREE" DataType="System.String"/>
+    <Parameter Name="P_BGROUP" DataType="System.Int32"/>
+    <Parameter Name="P_OST" DataType="System.Int32"/>
+    <Parameter Name="P_OSTVAL" DataType="System.Double"/>
+    <Parameter Name="P_OSTLIMIT" DataType="System.Int32"/>
+    <Parameter Name="P_PRICE_TYPE" DataType="System.Int32"/>
+    <Parameter Name="P_RUBNAME" DataType="System.String"/>
+    <Parameter Name="P_IN_SUPP" DataType="System.Int32"/>
+    <Parameter Name="P_IN_PRICE" DataType="System.Int32"/>
+    <Parameter Name="P_DAYS_AFTER_IN" DataType="System.Int32"/>
+    <Parameter Name="P_FIRSTDATE" DataType="System.String"/>
+    <Parameter Name="P_LASTDATE" DataType="System.String"/>
+    <Parameter Name="P_OP_1" DataType="System.Int32"/>
+    <Parameter Name="P_OP_10" DataType="System.Int32"/>
+    <Parameter Name="P_OP_4" DataType="System.Int32"/>
+    <Total Name="IncomeSumClass" Expression="[RepData.INCOMESUM]" Evaluator="DataSpec" PrintOn="GroupFooterClass" IncludeInvisibleRows="true"/>
+    <Total Name="AccountSumClass" Expression="[RepData.ACCOUNTSUM]" Evaluator="DataSpec" PrintOn="GroupFooterClass" IncludeInvisibleRows="true"/>
+    <Total Name="IncomeSumLoc" Expression="[RepData.INCOMESUM]" Evaluator="DataSpec" PrintOn="GroupFooterLoc" IncludeInvisibleRows="true"/>
+    <Total Name="AccountSumLoc" Expression="[RepData.ACCOUNTSUM]" Evaluator="DataSpec" PrintOn="GroupFooterLoc" IncludeInvisibleRows="true"/>
+    <Total Name="IncomeSumRep" Expression="[RepData.INCOMESUM]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
+    <Total Name="AccountSumRep" Expression="[RepData.ACCOUNTSUM]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
+    <Total Name="QtyClass" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="GroupFooterClass" IncludeInvisibleRows="true"/>
+    <Total Name="QtyLoc" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="GroupFooterLoc" IncludeInvisibleRows="true"/>
+    <Total Name="QtyRep" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
+  </Dictionary>
+  <ReportPage Name="Page1" Landscape="true" PaperWidth="297" PaperHeight="210" RawPaperSize="9" FirstPageSource="15" OtherPagesSource="15" Fill.Color="White" TitleBeforeHeader="false">
+    <PageHeaderBand Name="PageHeader" Width="1047.06" Height="15.12" CanGrow="true">
+      <TextObject Name="txtSurname" Left="506.52" Width="536.76" Height="15.12" CanGrow="true" CanBreak="false" Text="[P_SURNAME]" HorzAlign="Right" Font="Arial, 8pt"/>
+      <TextObject Name="txtPrintDate" Left="317.52" Width="189" Height="15.12" Text="Дата печати: [Format(&quot;{0:dd.MM.yy HH:mm}&quot;, [Date])]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
+      <TextObject Name="txtUserName" Width="317.52" Height="15.12" CanGrow="true" CanBreak="false" Text="[sUserName]" Font="Arial, 8pt"/>
+    </PageHeaderBand>
+    <ReportTitleBand Name="ReportTitle" Top="18.15" Width="1047.06" Height="98.28" CanGrow="true">
+      <TextObject Name="TextReport2" Top="30.24" Width="1043.28" Height="68.04" CanGrow="true" CanBreak="false" Text="[sTitle]&#13;&#10;[sLocName]&#13;&#10;[sGroupName]&#13;&#10;[sPriceName]" Padding="2, 2, 2, 0" HorzAlign="Center"/>
+      <TextObject Name="TextReport1" Top="3.78" Width="1043.28" Height="26.46" CanBreak="false" Text="[sRepName]" Padding="2, 2, 2, 0" HorzAlign="Center" Font="Arial, 12pt, style=Bold"/>
+    </ReportTitleBand>
+    <ColumnHeaderBand Name="ColumnHeader1" Top="119.46" Width="1047.06" Height="37.8" CanGrow="true" PrintOn="LastPage, OddPages, EvenPages, RepeatedBand">
+      <TextObject Name="TextPageTitle" Left="98.28" Width="343.98" Height="37.8" CanGrow="true" CanBreak="false" Text="[sRepName]&#13;&#10;[sLocName]&#13;&#10;[sGroupName]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
+      <TextObject Name="txtPage" Width="94.5" Height="15.12" CanBreak="false" Text="Лист [Page#] из [TotalPages#]" WordWrap="false" Font="Arial, 8pt"/>
+      <TextObject Name="TextPageTitle1" Left="442.26" Width="601.02" Height="37.8" CanGrow="true" CanBreak="false" Text="[sTitle]&#13;&#10;[sPriceName]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
+      <ChildBand Name="TableHeaderIncome" Top="160.29" Width="1047.06" Height="56.7">
+        <TableObject Name="TableHeaderSpecIncome" Width="1043.28" Height="56.7" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+          <TableColumn Name="ColumnHeaderNuIncome" Width="26.46"/>
+          <TableColumn Name="ColumnHeaderArticleIncome" Width="113.4"/>
+          <TableColumn Name="ColumnHeaderNameIncome" Width="264.6"/>
+          <TableColumn Name="ColumnHeaderClient" Width="226.8"/>
+          <TableColumn Name="ColumnHeaderMesIncome" Width="34.02"/>
+          <TableColumn Name="ColumnHeaderQtyIncome" Width="94.5"/>
+          <TableColumn Name="ColumnHeader13" Width="94.5"/>
+          <TableColumn Name="ColumnHeaderAccountSum" Width="94.5"/>
+          <TableColumn Name="ColumnHeaderIncomeSum" Width="94.5"/>
+          <TableRow Name="Row16" Height="56.7">
+            <TableCell Name="CellHeaderNuIncome" Border.Lines="Right" Border.Width="0.3" Text="№&#13;&#10;п/п" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="CellHeaderArticleIncome" Border.Lines="Right" Border.Width="0.3" Text="Артикул" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="CellHeaderNameIncome" Border.Lines="Right" Border.Width="0.3" Text="Наименование товара" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="Cell736" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Поставщик" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="CellHeaderMesIncome" Border.Lines="Right" Border.Width="0.3" Text="Ед.&#13;&#10;изм." Padding="0, 1, 0, 1" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="Cell735" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Текущий&#13;&#10;остаток" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="CellAccountPrice" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Цена&#13;&#10;учетная" Padding="0, 1, 0, 1" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="CellAccountSum" Border.Lines="Right" Border.Width="0.3" Text="Сумма&#13;&#10;в учетных&#13;&#10;ценах" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="Cell737" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Сумма в ценах&#13;&#10;последних&#13;&#10;приходов, [P_RUBNAME]" Padding="0, 0, 0, 0" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+          </TableRow>
+        </TableObject>
+      </ChildBand>
+    </ColumnHeaderBand>
+    <GroupHeaderBand Name="GroupHeaderLoc" Top="220.02" Width="1047.06" Height="34.02" CanGrow="true" CanShrink="true" BeforePrintEvent="GroupHeaderLoc_BeforePrint" KeepWithData="true" Condition="[RepData.LOCNAME]" SortOrder="None">
+      <TextObject Name="TextHeaderLoc" Width="1043.28" Height="34.02" CanGrow="true" CanBreak="false" Text="Место хранения: [RepData.LOCNAME]" Padding="0, 9, 0, 0" VertAlign="Center" Font="Arial, 11pt, style=Bold"/>
+      <GroupHeaderBand Name="GroupHeaderClass" Top="257.07" Width="1047.06" Height="22.68" CanGrow="true" CanShrink="true" KeepWithData="true" Condition="[RepData.GROUPNAME]" SortOrder="None">
+        <TextObject Name="TextHeaderClass" Left="26.46" Width="1016.82" Height="22.68" CanGrow="true" CanBreak="false" Text="[RepData.GROUPNAME]" Padding="0, 9, 0, 0" VertAlign="Center" Font="Arial, 10pt, style=Bold"/>
+        <DataBand Name="DataSpec" Top="282.78" Width="1047.06" Height="18.9" CanGrow="true" BeforePrintEvent="DataSpec_BeforePrint" DataSource="RepData" PrintIfDetailEmpty="true">
+          <TableObject Name="TableSpec" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+            <TableColumn Name="ColumnDate" Width="26.46"/>
+            <TableColumn Name="ColumnDocID" Width="113.4"/>
+            <TableColumn Name="ColumnName" Width="264.6"/>
+            <TableColumn Name="ColumnClient" Width="226.8"/>
+            <TableColumn Name="Column202" Width="34.02"/>
+            <TableColumn Name="ColumnSupplDoc" Width="94.5"/>
+            <TableColumn Name="ColumnReservedQty" Width="94.5"/>
+            <TableColumn Name="ColumnAccountSum" Width="94.5"/>
+            <TableColumn Name="ColumnIncomeSum" Width="94.5"/>
+            <TableRow Name="RowSpec" MinHeight="18.9" AutoSize="true">
+              <TableCell Name="CellNu" Border.Lines="Right" Border.Width="0.3" Text="[iArticlePos]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="CellArticle" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ARTICLE]" Padding="4, 5, 0, 0" Font="Arial, 8pt"/>
+              <TableCell Name="Cell133" Border.Lines="Right" Border.Width="0.3" Text="[RepData.CARDNAME]" Padding="4, 5, 0, 0" Font="Arial, 7pt"/>
+              <TableCell Name="CellBarCode" Border.Lines="Right" Border.Width="0.3" Text="[RepData.CLIENTNAME]" Padding="4, 5, 0, 0" Font="Arial, 7pt"/>
+              <TableCell Name="Cell660" Border.Lines="Right" Border.Width="0.3" Text="[RepData.MESNAME]" Padding="0, 5, 0, 0" HorzAlign="Center" Font="Arial, 8pt"/>
+              <TableCell Name="qCell451" Border.Lines="Right" Border.Width="0.3" Text="[RepData.QUANTITY]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="mCell454" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ACCOUNTPRICE]" Padding="0, 5, 2, 0" AutoShrink="FontSize" AutoShrinkMinSize="6" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="mCell453" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ACCOUNTSUM]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="mCell452" Border.Lines="Right" Border.Width="0.3" Text="[RepData.INCOMESUM]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            </TableRow>
+          </TableObject>
+        </DataBand>
+        <GroupFooterBand Name="GroupFooterClass" Top="304.71" Width="1047.06" Height="18.9" CanGrow="true" KeepWithData="true">
+          <TableObject Name="Table8" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+            <TableColumn Name="Column179" Width="26.46"/>
+            <TableColumn Name="ColumnDocIDClass" Width="113.4"/>
+            <TableColumn Name="ColumnNameClass" Width="480.06"/>
+            <TableColumn Name="Column203" Width="45.36"/>
+            <TableColumn Name="Column182" Width="94.5"/>
+            <TableColumn Name="ColumnReservedQtyClass" Width="94.5"/>
+            <TableColumn Name="ColumnAccountSumClass" Width="94.5"/>
+            <TableColumn Name="ColumnIncomeSumClass" Width="94.5"/>
+            <TableRow Name="Row9" AutoSize="true">
+              <TableCell Name="CellFooterClass" Text="Итого по группе [RepData.GROUPNAME]" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
+              <TableCell Name="Cell589" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="Cell590" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="Cell661" Border.Lines="Right" Border.Width="0.3"/>
+              <TableCell Name="qCell591" Border.Lines="Right" Border.Width="0.3" Text="[QtyClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="CellReservedQtyClass" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="mCellAwaitedQtyClass" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="mCellWorkQtyClass" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            </TableRow>
+          </TableObject>
+        </GroupFooterBand>
+      </GroupHeaderBand>
+      <GroupFooterBand Name="GroupFooterLoc" Top="326.64" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true" KeepWithData="true">
+        <TableObject Name="TableFooterLoc" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+          <TableColumn Name="Column241" Width="26.46"/>
+          <TableColumn Name="Column242" Width="113.4"/>
+          <TableColumn Name="ColumnNameLoc" Width="480.06"/>
+          <TableColumn Name="Column245" Width="45.36"/>
+          <TableColumn Name="Column246" Width="94.5"/>
+          <TableColumn Name="ColumnReservedQtyLoc" Width="94.5"/>
+          <TableColumn Name="ColumnAccountSumLoc" Width="94.5"/>
+          <TableColumn Name="ColumnIncomeSumLoc" Width="94.5"/>
+          <TableRow Name="Row13" AutoSize="true">
+            <TableCell Name="CellFooterLoc" Text="Итого по месту хран. [RepData.LOCNAME]" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
+            <TableCell Name="Cell694" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="Cell695" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="Cell697" Border.Lines="Right" Border.Width="0.3"/>
+            <TableCell Name="qCell698" Border.Lines="Right" Border.Width="0.3" Text="[QtyLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="CellReservedQtyLoc" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="mCellAwaitedQtyLoc" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="mCellWorkQtyLoc" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          </TableRow>
+        </TableObject>
+      </GroupFooterBand>
+    </GroupHeaderBand>
+    <ReportSummaryBand Name="ReportSummary" Top="348.57" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true">
+      <TableObject Name="TableReportSummary" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+        <TableColumn Name="Column228" Width="26.46"/>
+        <TableColumn Name="Column229" Width="113.4"/>
+        <TableColumn Name="ColumnNameRep" Width="480.06"/>
+        <TableColumn Name="Column232" Width="45.36"/>
+        <TableColumn Name="Column233" Width="94.5"/>
+        <TableColumn Name="ColumnReservedQtyRep" Width="94.5"/>
+        <TableColumn Name="ColumnAccountSumRep" Width="94.5"/>
+        <TableColumn Name="ColumnIncomeSumRep" Width="94.5"/>
+        <TableRow Name="Row12" AutoSize="true">
+          <TableCell Name="Cell681" Text="Итого по отчету" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
+          <TableCell Name="Cell682" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="Cell683" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="Cell685" Border.Lines="Right" Border.Width="0.3"/>
+          <TableCell Name="qCell686" Border.Lines="Right" Border.Width="0.3" Text="[QtyRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="CellReservedQtyRep" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="mCellAccountSumRep" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="mCellWorkQtyRep" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+        </TableRow>
+      </TableObject>
+    </ReportSummaryBand>
+  </ReportPage>
+</Report>
