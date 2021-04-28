@@ -1,5 +1,5 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<Report ScriptLanguage="CSharp" ReferencedAssemblies="System.dll&#13;&#10;System.Drawing.dll&#13;&#10;System.Windows.Forms.dll&#13;&#10;System.Data.dll&#13;&#10;System.Xml.dll&#13;&#10;System.Data.OracleClient.dll&#13;&#10;Sm.Objects.dll&#13;&#10;Sm.Interfaces.dll&#13;&#10;Sm.Core.dll&#13;&#10;Sm.Forms.dll&#13;&#10;Sm.AppServer.Interfaces.dll&#13;&#10;Sm.AppServer.Link.dll&#13;&#10;Sm.FastReports.dll&#13;&#10;Sm.FastReports.Link.dll" ConvertNulls="false" StartReportEvent="_StartReport" ReportInfo.Created="06/22/2010 10:01:00" ReportInfo.Modified="07/08/2014 10:24:04" ReportInfo.CreatorVersion="1.9.2.0">
+<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" ReferencedAssemblies="System.dll&#13;&#10;System.Drawing.dll&#13;&#10;System.Windows.Forms.dll&#13;&#10;System.Data.dll&#13;&#10;System.Xml.dll&#13;&#10;System.Data.OracleClient.dll&#13;&#10;Sm.Objects.dll&#13;&#10;Sm.Interfaces.dll&#13;&#10;Sm.Core.dll&#13;&#10;Sm.Forms.dll&#13;&#10;Sm.AppServer.Interfaces.dll&#13;&#10;Sm.AppServer.Link.dll&#13;&#10;Sm.FastReports.dll&#13;&#10;Sm.FastReports.Link.dll" ConvertNulls="false" StartReportEvent="_StartReport" ReportInfo.Created="06/22/2010 10:01:00" ReportInfo.Modified="08/04/2014 16:41:34" ReportInfo.CreatorVersion="1.9.2.0">
   <ScriptText>using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -186,6 +186,7 @@ namespace FastReport
         : &quot;''&quot;)+
         &quot; ClientName&quot;+
         &quot;,m.Quantity&quot;+
+        &quot;,NVL ( g.quantity + g.foundquantity - (g.reservedquantity + g.incomingquantity),0) free&quot;+
         // цена учетная или выбранного вида цены
         &quot;,nvl(a.Price,0) AccountPrice&quot;+
         // сумма остатков в ценах учетных или в выбранном виде цены
@@ -197,12 +198,15 @@ namespace FastReport
               &quot;supermag.SVCardName crd&quot;+
               &quot;,supermag.TTRemains m&quot;+
               &quot;,supermag.TTArticlePrice a&quot;+
+              &quot;,supermag.smgoods g&quot;+
               (isViewIncomeSum ? &quot;,supermag.TTOstatki2 o2&quot; : &quot;&quot;)+
               (isViewAccountPrice ? &quot;,supermag.SVAAccPrice ap&quot; : &quot;&quot;)+
         &quot; where crd.article = m.article&quot;+
         &quot; and l.ID = m.StoreLoc&quot;+
         &quot; and a.LocID(+)=m.StoreLoc&quot;+
         &quot; and a.Article(+)=m.Article&quot;+
+        &quot; and g.storeloc(+)=m.StoreLoc&quot;+
+        &quot; and g.Article(+)=m.Article&quot;+
         RepOracleRunner.ExecuteScalar&lt;string&gt;(host.Connection, &quot;select supermag.RepTools.ClassString(6,'m') from dual&quot;)+
         (isViewIncomeSum ? &quot; and o2.Article(+)=m.Article and o2.LocID(+)=m.StoreLoc&quot; : &quot;&quot;)+
         (isViewAccountPrice ? &quot; and ap.StoreLoc(+)=l.ID&quot; : &quot;&quot;)
@@ -217,7 +221,7 @@ namespace FastReport
       else if ( ToInt32(Report.GetParameterValue(&quot;P_SORT&quot;)) == 1 )
         sSQL += &quot;6&quot;; // по наименованию товара
       else
-        sSQL += &quot;9 desc&quot;; // по убыванию текущих остатков
+        sSQL += &quot;10 desc&quot;; // по убыванию доступно
       host.TableDataSourcePreInit(&quot;RepData&quot;, sSQL);     
 
     }
@@ -240,7 +244,7 @@ namespace FastReport
 </ScriptText>
   <Dictionary>
     <SupermagFastReportConnection Name="Connection" LoginPrompt="true">
-      <TableDataSource Name="RepData" DataType="System.Int32" PropName="Table2" Enabled="true" SelectCommand="SELECT &#13;&#10; '' LocName&#13;&#10;, 0 LocID&#13;&#10;, '' GroupName&#13;&#10;, '' GroupNormTree&#13;&#10;, '' Article&#13;&#10;, '' CardName&#13;&#10;, '' MesName&#13;&#10;, '' ClientName&#13;&#10;, 0 Quantity&#13;&#10;, 0 AccountPrice &#13;&#10;, 0 AccountSum &#13;&#10;, 0 IncomeSum&#13;&#10;FROM dual">
+      <TableDataSource Name="RepData" DataType="System.Int32" PropName="Table2" Enabled="true" SelectCommand="SELECT &#13;&#10; '' LocName&#13;&#10;, 0 LocID&#13;&#10;, '' GroupName&#13;&#10;, '' GroupNormTree&#13;&#10;, '' Article&#13;&#10;, '' CardName&#13;&#10;, '' MesName&#13;&#10;, '' ClientName&#13;&#10;, 0 Quantity&#13;&#10;, 0 Free&#13;&#10;, 0 AccountPrice &#13;&#10;, 0 AccountSum &#13;&#10;, 0 IncomeSum&#13;&#10;FROM dual">
         <Column Name="LOCNAME" DataType="System.String"/>
         <Column Name="LOCID" DataType="System.Decimal"/>
         <Column Name="GROUPNAME" DataType="System.String"/>
@@ -250,6 +254,7 @@ namespace FastReport
         <Column Name="MESNAME" DataType="System.String"/>
         <Column Name="CLIENTNAME" DataType="System.String"/>
         <Column Name="QUANTITY" DataType="System.Decimal"/>
+        <Column Name="FREE" DataType="System.Decimal"/>
         <Column Name="ACCOUNTPRICE" DataType="System.Decimal"/>
         <Column Name="ACCOUNTSUM" DataType="System.Decimal"/>
         <Column Name="INCOMESUM" DataType="System.Decimal"/>
@@ -284,9 +289,6 @@ namespace FastReport
     <Total Name="AccountSumLoc" Expression="[RepData.ACCOUNTSUM]" Evaluator="DataSpec" PrintOn="GroupFooterLoc" IncludeInvisibleRows="true"/>
     <Total Name="IncomeSumRep" Expression="[RepData.INCOMESUM]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
     <Total Name="AccountSumRep" Expression="[RepData.ACCOUNTSUM]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
-    <Total Name="QtyClass" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="GroupFooterClass" IncludeInvisibleRows="true"/>
-    <Total Name="QtyLoc" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="GroupFooterLoc" IncludeInvisibleRows="true"/>
-    <Total Name="QtyRep" Expression="[RepData.QUANTITY]" Evaluator="DataSpec" PrintOn="ReportSummary" IncludeInvisibleRows="true"/>
   </Dictionary>
   <ReportPage Name="Page1" Landscape="true" PaperWidth="297" PaperHeight="210" RawPaperSize="9" FirstPageSource="15" OtherPagesSource="15" Fill.Color="White" TitleBeforeHeader="false">
     <PageHeaderBand Name="PageHeader" Width="1047.06" Height="15.12" CanGrow="true">
@@ -294,25 +296,26 @@ namespace FastReport
       <TextObject Name="txtPrintDate" Left="317.52" Width="189" Height="15.12" Text="Дата печати: [Format(&quot;{0:dd.MM.yy HH:mm}&quot;, [Date])]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
       <TextObject Name="txtUserName" Width="317.52" Height="15.12" CanGrow="true" CanBreak="false" Text="[sUserName]" Font="Arial, 8pt"/>
     </PageHeaderBand>
-    <ReportTitleBand Name="ReportTitle" Top="18.15" Width="1047.06" Height="98.28" CanGrow="true">
+    <ReportTitleBand Name="ReportTitle" Top="19.12" Width="1047.06" Height="98.28" CanGrow="true">
       <TextObject Name="TextReport2" Top="30.24" Width="1043.28" Height="68.04" CanGrow="true" CanBreak="false" Text="[sTitle]&#13;&#10;[sLocName]&#13;&#10;[sGroupName]&#13;&#10;[sPriceName]" Padding="2, 2, 2, 0" HorzAlign="Center"/>
       <TextObject Name="TextReport1" Top="3.78" Width="1043.28" Height="26.46" CanBreak="false" Text="[sRepName]" Padding="2, 2, 2, 0" HorzAlign="Center" Font="Arial, 12pt, style=Bold"/>
     </ReportTitleBand>
-    <ColumnHeaderBand Name="ColumnHeader1" Top="119.46" Width="1047.06" Height="37.8" CanGrow="true" PrintOn="LastPage, OddPages, EvenPages, RepeatedBand">
+    <ColumnHeaderBand Name="ColumnHeader1" Top="121.4" Width="1047.06" Height="37.8" CanGrow="true" PrintOn="LastPage, OddPages, EvenPages, RepeatedBand">
       <TextObject Name="TextPageTitle" Left="98.28" Width="343.98" Height="37.8" CanGrow="true" CanBreak="false" Text="[sRepName]&#13;&#10;[sLocName]&#13;&#10;[sGroupName]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
       <TextObject Name="txtPage" Width="94.5" Height="15.12" CanBreak="false" Text="Лист [Page#] из [TotalPages#]" WordWrap="false" Font="Arial, 8pt"/>
       <TextObject Name="TextPageTitle1" Left="442.26" Width="601.02" Height="37.8" CanGrow="true" CanBreak="false" Text="[sTitle]&#13;&#10;[sPriceName]" Padding="0, 0, 2, 0" Font="Arial, 8pt"/>
-      <ChildBand Name="TableHeaderIncome" Top="160.29" Width="1047.06" Height="56.7">
-        <TableObject Name="TableHeaderSpecIncome" Width="1043.28" Height="56.7" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+      <ChildBand Name="TableHeaderIncome" Top="163.2" Width="1047.06" Height="56.7">
+        <TableObject Name="TableHeaderSpecIncome" Width="1052.73" Height="56.7" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
           <TableColumn Name="ColumnHeaderNuIncome" Width="26.46"/>
-          <TableColumn Name="ColumnHeaderArticleIncome" Width="113.4"/>
+          <TableColumn Name="ColumnHeaderArticleIncome" Width="85.05"/>
           <TableColumn Name="ColumnHeaderNameIncome" Width="264.6"/>
-          <TableColumn Name="ColumnHeaderClient" Width="226.8"/>
+          <TableColumn Name="ColumnHeaderClient" Width="217.35"/>
           <TableColumn Name="ColumnHeaderMesIncome" Width="34.02"/>
-          <TableColumn Name="ColumnHeaderQtyIncome" Width="94.5"/>
-          <TableColumn Name="ColumnHeader13" Width="94.5"/>
-          <TableColumn Name="ColumnHeaderAccountSum" Width="94.5"/>
-          <TableColumn Name="ColumnHeaderIncomeSum" Width="94.5"/>
+          <TableColumn Name="ColumnHeaderQtyIncome" Width="85.05"/>
+          <TableColumn Name="Column247" Width="85.05"/>
+          <TableColumn Name="ColumnHeader13" Width="85.05"/>
+          <TableColumn Name="ColumnHeaderAccountSum" Width="85.05"/>
+          <TableColumn Name="ColumnHeaderIncomeSum" Width="85.05"/>
           <TableRow Name="Row16" Height="56.7">
             <TableCell Name="CellHeaderNuIncome" Border.Lines="Right" Border.Width="0.3" Text="№&#13;&#10;п/п" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="CellHeaderArticleIncome" Border.Lines="Right" Border.Width="0.3" Text="Артикул" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
@@ -320,6 +323,7 @@ namespace FastReport
             <TableCell Name="Cell736" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Поставщик" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="CellHeaderMesIncome" Border.Lines="Right" Border.Width="0.3" Text="Ед.&#13;&#10;изм." Padding="0, 1, 0, 1" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="Cell735" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Текущий&#13;&#10;остаток" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
+            <TableCell Name="Cell738" Border.Lines="All" Text="Доступно" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="CellAccountPrice" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Цена&#13;&#10;учетная" Padding="0, 1, 0, 1" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="CellAccountSum" Border.Lines="Right" Border.Width="0.3" Text="Сумма&#13;&#10;в учетных&#13;&#10;ценах" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
             <TableCell Name="Cell737" Border.Lines="Right, Bottom" Border.Width="0.3" Text="Сумма в ценах&#13;&#10;последних&#13;&#10;приходов, [P_RUBNAME]" Padding="0, 0, 0, 0" HorzAlign="Center" VertAlign="Center" Font="Arial, 8pt, style=Bold"/>
@@ -327,21 +331,22 @@ namespace FastReport
         </TableObject>
       </ChildBand>
     </ColumnHeaderBand>
-    <GroupHeaderBand Name="GroupHeaderLoc" Top="220.02" Width="1047.06" Height="34.02" CanGrow="true" CanShrink="true" BeforePrintEvent="GroupHeaderLoc_BeforePrint" KeepWithData="true" Condition="[RepData.LOCNAME]" SortOrder="None">
+    <GroupHeaderBand Name="GroupHeaderLoc" Top="223.9" Width="1047.06" Height="34.02" CanGrow="true" CanShrink="true" BeforePrintEvent="GroupHeaderLoc_BeforePrint" KeepWithData="true" Condition="[RepData.LOCNAME]" SortOrder="None">
       <TextObject Name="TextHeaderLoc" Width="1043.28" Height="34.02" CanGrow="true" CanBreak="false" Text="Место хранения: [RepData.LOCNAME]" Padding="0, 9, 0, 0" VertAlign="Center" Font="Arial, 11pt, style=Bold"/>
-      <GroupHeaderBand Name="GroupHeaderClass" Top="257.07" Width="1047.06" Height="22.68" CanGrow="true" CanShrink="true" KeepWithData="true" Condition="[RepData.GROUPNAME]" SortOrder="None">
+      <GroupHeaderBand Name="GroupHeaderClass" Top="261.92" Width="1047.06" Height="22.68" CanGrow="true" CanShrink="true" KeepWithData="true" Condition="[RepData.GROUPNAME]" SortOrder="None">
         <TextObject Name="TextHeaderClass" Left="26.46" Width="1016.82" Height="22.68" CanGrow="true" CanBreak="false" Text="[RepData.GROUPNAME]" Padding="0, 9, 0, 0" VertAlign="Center" Font="Arial, 10pt, style=Bold"/>
-        <DataBand Name="DataSpec" Top="282.78" Width="1047.06" Height="18.9" CanGrow="true" BeforePrintEvent="DataSpec_BeforePrint" DataSource="RepData" PrintIfDetailEmpty="true">
-          <TableObject Name="TableSpec" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+        <DataBand Name="DataSpec" Top="288.6" Width="1047.06" Height="18.9" CanGrow="true" BeforePrintEvent="DataSpec_BeforePrint" DataSource="RepData" PrintIfDetailEmpty="true">
+          <TableObject Name="TableSpec" Width="1052.73" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
             <TableColumn Name="ColumnDate" Width="26.46"/>
-            <TableColumn Name="ColumnDocID" Width="113.4"/>
+            <TableColumn Name="ColumnDocID" Width="85.05"/>
             <TableColumn Name="ColumnName" Width="264.6"/>
-            <TableColumn Name="ColumnClient" Width="226.8"/>
+            <TableColumn Name="ColumnClient" Width="217.35"/>
             <TableColumn Name="Column202" Width="34.02"/>
-            <TableColumn Name="ColumnSupplDoc" Width="94.5"/>
-            <TableColumn Name="ColumnReservedQty" Width="94.5"/>
-            <TableColumn Name="ColumnAccountSum" Width="94.5"/>
-            <TableColumn Name="ColumnIncomeSum" Width="94.5"/>
+            <TableColumn Name="ColumnSupplDoc" Width="85.05"/>
+            <TableColumn Name="Column248" Width="85.05"/>
+            <TableColumn Name="ColumnReservedQty" Width="85.05"/>
+            <TableColumn Name="ColumnAccountSum" Width="85.05"/>
+            <TableColumn Name="ColumnIncomeSum" Width="85.05"/>
             <TableRow Name="RowSpec" MinHeight="18.9" AutoSize="true">
               <TableCell Name="CellNu" Border.Lines="Right" Border.Width="0.3" Text="[iArticlePos]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="CellArticle" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ARTICLE]" Padding="4, 5, 0, 0" Font="Arial, 8pt"/>
@@ -349,28 +354,31 @@ namespace FastReport
               <TableCell Name="CellBarCode" Border.Lines="Right" Border.Width="0.3" Text="[RepData.CLIENTNAME]" Padding="4, 5, 0, 0" Font="Arial, 7pt"/>
               <TableCell Name="Cell660" Border.Lines="Right" Border.Width="0.3" Text="[RepData.MESNAME]" Padding="0, 5, 0, 0" HorzAlign="Center" Font="Arial, 8pt"/>
               <TableCell Name="qCell451" Border.Lines="Right" Border.Width="0.3" Text="[RepData.QUANTITY]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="Cell739" Border.Lines="All" Text="[RepData.FREE]" Format="Number" Format.UseLocale="false" Format.DecimalDigits="3" Format.DecimalSeparator="." Format.GroupSeparator=" " Format.NegativePattern="1" HorzAlign="Right" VertAlign="Bottom" Font="Arial, 8pt"/>
               <TableCell Name="mCell454" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ACCOUNTPRICE]" Padding="0, 5, 2, 0" AutoShrink="FontSize" AutoShrinkMinSize="6" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="mCell453" Border.Lines="Right" Border.Width="0.3" Text="[RepData.ACCOUNTSUM]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="mCell452" Border.Lines="Right" Border.Width="0.3" Text="[RepData.INCOMESUM]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
             </TableRow>
           </TableObject>
         </DataBand>
-        <GroupFooterBand Name="GroupFooterClass" Top="304.71" Width="1047.06" Height="18.9" CanGrow="true" KeepWithData="true">
-          <TableObject Name="Table8" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+        <GroupFooterBand Name="GroupFooterClass" Top="311.5" Width="1047.06" Height="18.9" CanGrow="true" KeepWithData="true">
+          <TableObject Name="Table8" Width="1052.73" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
             <TableColumn Name="Column179" Width="26.46"/>
             <TableColumn Name="ColumnDocIDClass" Width="113.4"/>
-            <TableColumn Name="ColumnNameClass" Width="480.06"/>
+            <TableColumn Name="ColumnNameClass" Width="442.26"/>
             <TableColumn Name="Column203" Width="45.36"/>
-            <TableColumn Name="Column182" Width="94.5"/>
-            <TableColumn Name="ColumnReservedQtyClass" Width="94.5"/>
-            <TableColumn Name="ColumnAccountSumClass" Width="94.5"/>
-            <TableColumn Name="ColumnIncomeSumClass" Width="94.5"/>
+            <TableColumn Name="Column182" Width="85.05"/>
+            <TableColumn Name="Column249" Width="85.05"/>
+            <TableColumn Name="ColumnReservedQtyClass" Width="85.05"/>
+            <TableColumn Name="ColumnAccountSumClass" Width="85.05"/>
+            <TableColumn Name="ColumnIncomeSumClass" Width="85.05"/>
             <TableRow Name="Row9" AutoSize="true">
               <TableCell Name="CellFooterClass" Text="Итого по группе [RepData.GROUPNAME]" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
               <TableCell Name="Cell589" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="Cell590" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
-              <TableCell Name="Cell661" Border.Lines="Right" Border.Width="0.3"/>
-              <TableCell Name="qCell591" Border.Lines="Right" Border.Width="0.3" Text="[QtyClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="Cell661" Border.Lines="Right" Border.LeftLine.Width="0.3" Border.TopLine.Width="0.3" Border.BottomLine.Width="0.3"/>
+              <TableCell Name="Cell591" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+              <TableCell Name="Cell740"/>
               <TableCell Name="CellReservedQtyClass" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="mCellAwaitedQtyClass" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
               <TableCell Name="mCellWorkQtyClass" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumClass]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
@@ -378,22 +386,24 @@ namespace FastReport
           </TableObject>
         </GroupFooterBand>
       </GroupHeaderBand>
-      <GroupFooterBand Name="GroupFooterLoc" Top="326.64" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true" KeepWithData="true">
-        <TableObject Name="TableFooterLoc" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+      <GroupFooterBand Name="GroupFooterLoc" Top="334.4" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true" KeepWithData="true">
+        <TableObject Name="TableFooterLoc" Width="1052.73" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
           <TableColumn Name="Column241" Width="26.46"/>
           <TableColumn Name="Column242" Width="113.4"/>
-          <TableColumn Name="ColumnNameLoc" Width="480.06"/>
+          <TableColumn Name="ColumnNameLoc" Width="442.26"/>
           <TableColumn Name="Column245" Width="45.36"/>
-          <TableColumn Name="Column246" Width="94.5"/>
-          <TableColumn Name="ColumnReservedQtyLoc" Width="94.5"/>
-          <TableColumn Name="ColumnAccountSumLoc" Width="94.5"/>
-          <TableColumn Name="ColumnIncomeSumLoc" Width="94.5"/>
+          <TableColumn Name="Column246" Width="85.05"/>
+          <TableColumn Name="Column250" Width="85.05"/>
+          <TableColumn Name="ColumnReservedQtyLoc" Width="85.05"/>
+          <TableColumn Name="ColumnAccountSumLoc" Width="85.05"/>
+          <TableColumn Name="ColumnIncomeSumLoc" Width="85.05"/>
           <TableRow Name="Row13" AutoSize="true">
             <TableCell Name="CellFooterLoc" Text="Итого по месту хран. [RepData.LOCNAME]" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
             <TableCell Name="Cell694" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
             <TableCell Name="Cell695" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
             <TableCell Name="Cell697" Border.Lines="Right" Border.Width="0.3"/>
-            <TableCell Name="qCell698" Border.Lines="Right" Border.Width="0.3" Text="[QtyLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="Cell698" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+            <TableCell Name="Cell741"/>
             <TableCell Name="CellReservedQtyLoc" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
             <TableCell Name="mCellAwaitedQtyLoc" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
             <TableCell Name="mCellWorkQtyLoc" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumLoc]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
@@ -401,22 +411,24 @@ namespace FastReport
         </TableObject>
       </GroupFooterBand>
     </GroupHeaderBand>
-    <ReportSummaryBand Name="ReportSummary" Top="348.57" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true">
-      <TableObject Name="TableReportSummary" Width="1043.28" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
+    <ReportSummaryBand Name="ReportSummary" Top="357.3" Width="1047.06" Height="18.9" CanGrow="true" CanShrink="true" KeepChild="true">
+      <TableObject Name="TableReportSummary" Width="1052.73" Height="18.9" Border.Lines="All" Border.Width="0.3" GrowToBottom="true">
         <TableColumn Name="Column228" Width="26.46"/>
         <TableColumn Name="Column229" Width="113.4"/>
-        <TableColumn Name="ColumnNameRep" Width="480.06"/>
+        <TableColumn Name="ColumnNameRep" Width="442.26"/>
         <TableColumn Name="Column232" Width="45.36"/>
-        <TableColumn Name="Column233" Width="94.5"/>
-        <TableColumn Name="ColumnReservedQtyRep" Width="94.5"/>
-        <TableColumn Name="ColumnAccountSumRep" Width="94.5"/>
-        <TableColumn Name="ColumnIncomeSumRep" Width="94.5"/>
+        <TableColumn Name="Column233" Width="85.05"/>
+        <TableColumn Name="Column251" Width="85.05"/>
+        <TableColumn Name="ColumnReservedQtyRep" Width="85.05"/>
+        <TableColumn Name="ColumnAccountSumRep" Width="85.05"/>
+        <TableColumn Name="ColumnIncomeSumRep" Width="85.05"/>
         <TableRow Name="Row12" AutoSize="true">
           <TableCell Name="Cell681" Text="Итого по отчету" Padding="4, 5, 0, 0" Font="Arial, 8pt, style=Bold" ColSpan="3"/>
           <TableCell Name="Cell682" Border.Lines="Right" Border.Width="0.3" HorzAlign="Right" Font="Arial, 8pt"/>
           <TableCell Name="Cell683" Border.Lines="Right" Border.Width="0.3" Padding="4, 5, 4, 0" HorzAlign="Right" Font="Arial, 8pt"/>
           <TableCell Name="Cell685" Border.Lines="Right" Border.Width="0.3"/>
-          <TableCell Name="qCell686" Border.Lines="Right" Border.Width="0.3" Text="[QtyRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="Cell686" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
+          <TableCell Name="Cell742"/>
           <TableCell Name="CellReservedQtyRep" Border.Lines="Right" Border.Width="0.3" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
           <TableCell Name="mCellAccountSumRep" Border.Lines="Right" Border.Width="0.3" Text="[AccountSumRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
           <TableCell Name="mCellWorkQtyRep" Border.Lines="Right" Border.Width="0.3" Text="[IncomeSumRep]" Padding="0, 5, 2, 0" HorzAlign="Right" Font="Arial, 8pt"/>
